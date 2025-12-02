@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Energy-Efficient CPU Scheduler</title>
+
+<style>
+    body {
+        margin: 0;
+        padding: 0;
+        font-family: Arial, sans-serif;
+        background: #0b0f1a;
+        color: #f5f5f5;
+    }
+    .container {
+        width: 80%;
+        margin: 20px auto;
+    }
+    h1 {
+        text-align: center;
+        color: #4ae3ff;
+        text-shadow: 0 0 10px #00eaff;
+    }
+    .card {
+        background: #111726;
+        padding: 20px;
+        border-radius: 15px;
+        margin: 20px 0;
+        box-shadow: 0 0 10px #000;
+    }
+    input {
+        width: 120px;
+        padding: 6px;
+        border-radius: 6px;
+        border: none;
+        margin: 5px;
+    }
+    button {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 6px;
+        background: #4ae3ff;
+        font-weight: bold;
+        cursor: pointer;
+        margin: 5px 0;
+    }
+    button:hover {
+        background: #33b8d1;
+    }
+    .run-btn {
+        background: #ff9f43;
+    }
+    table {
+        width: 100%;
+        margin-top: 10px;
+        border-collapse: collapse;
+    }
+    th, td {
+        border-bottom: 1px solid #333;
+        padding: 8px;
+        text-align: center;
+        background: #151b30;
+    }
+    th {
+        background: #4ae3ff;
+        color: #000;
+        font-weight: bold;
+    }
+</style>
+</head>
+
+<body>
+<div class="container">
+    <h1>⚡ Energy-Efficient CPU Scheduling Simulator</h1>
+
+    <div class="card">
+        <h2>Input Section</h2>
+
+        <label>Number of Processes: </label>
+        <input type="number" id="num" min="1" placeholder="e.g. 5">
+        <button onclick="generateInputs()">Generate Input Fields</button>
+
+        <div id="processInputs"></div>
+
+        <label>RR Quantum: </label>
+        <input type="number" id="quantum" min="1" placeholder="e.g. 2">
+
+        <br>
+        <button class="run-btn" onclick="runAll()">Run All Algorithms</button>
+    </div>
+
+    <div id="results"></div>
+</div>
+
+<script>
+// ----- Generate dynamic AT/BT fields -----
+function generateInputs() {
+    var n = parseInt(document.getElementById("num").value);
+    var box = document.getElementById("processInputs");
+    box.innerHTML = "";
+
+    if (isNaN(n) || n <= 0) {
+        alert("Please enter a valid number of processes.");
+        return;
+    }
+
+    for (var i = 1; i <= n; i++) {
+        box.innerHTML +=
+            '<div class="card">' +
+            '<h3>Process P' + i + '</h3>' +
+            'AT: <input type="number" id="at' + i + '" min="0">' +
+            'BT: <input type="number" id="bt' + i + '" min="1">' +
+            '</div>';
+    }
+}
+
+// ----- Read processes and sort by (AT, PID) -----
+function getProcesses() {
+    var n = parseInt(document.getElementById("num").value);
+    if (isNaN(n) || n <= 0) {
+        alert("Enter number of processes and generate fields first.");
+        return null;
+    }
+
+    var arr = [];
+    for (var i = 1; i <= n; i++) {
+        var atVal = document.getElementById("at" + i).value;
+        var btVal = document.getElementById("bt" + i).value;
+
+        if (atVal === "" || btVal === "") {
+            alert("Please enter AT and BT for all processes.");
+            return null;
+        }
+
+        var at = parseInt(atVal);
+        var bt = parseInt(btVal);
+
+        if (isNaN(at) || isNaN(bt) || bt <= 0) {
+            alert("AT must be >= 0 and BT must be > 0.");
+            return null;
+        }
+
+        arr.push({ id: i, at: at, bt: bt });
+    }
+
+    arr.sort(function(a, b) {
+        if (a.at !== b.at) return a.at - b.at;
+        return a.id - b.id;
+    });
+
+    return arr;
+}
+
+// ----- Utility: calculate TAT & WT -----
+function calcMetrics(p) {
+    for (var i = 0; i < p.length; i++) {
+        p[i].tat = p[i].ct - p[i].at;
+        p[i].wt  = p[i].tat - p[i].bt;
+    }
+}
+
+// ----- Utility: build HTML table -----
+function buildTable(title, p) {
+    var html = '<div class="card">';
+    html += '<h2>' + title + '</h2>';
+    html += '<table>';
+    html += '<tr><th>PID</th><th>AT</th><th>BT</th><th>CT</th><th>TAT</th><th>WT</th></tr>';
+
+    for (var i = 0; i < p.length; i++) {
+        html += '<tr>' +
+            '<td>' + p[i].id  + '</td>' +
+            '<td>' + p[i].at  + '</td>' +
+            '<td>' + p[i].bt  + '</td>' +
+            '<td>' + p[i].ct  + '</td>' +
+            '<td>' + p[i].tat + '</td>' +
+            '<td>' + p[i].wt  + '</td>' +
+            '</tr>';
+    }
+
+    html += '</table></div>';
+    return html;
+}
+
+// ----- FCFS -----
+function fcfs(proc) {
+    var p = JSON.parse(JSON.stringify(proc));
+    var time = 0;
+    var energy = 0;
+
+    for (var i = 0; i < p.length; i++) {
+        if (time < p[i].at) time = p[i].at;
+        time += p[i].bt;
+        p[i].ct = time;
+        energy += 2.1 * (p[i].bt / 1000.0);
+    }
+
+    calcMetrics(p);
+    return { p: p, energy: energy };
+}
+
+// ----- Non-preemptive SJF -----
+function sjf(proc) {
+    var p = JSON.parse(JSON.stringify(proc));
+    var n = p.length;
+    var done = new Array(n).fill(false);
+    var completed = 0;
+    var energy = 0;
+    var time = p[0].at;
+
+    while (completed < n) {
+        var idx = -1;
+        var mn  = Number.POSITIVE_INFINITY;
+
+        for (var i = 0; i < n; i++) {
+            if (!done[i] && p[i].at <= time) {
+                if (p[i].bt < mn || (p[i].bt === mn && p[i].id < p[idx].id)) {
+                    mn = p[i].bt;
+                    idx = i;
+                }
+            }
+        }
+
+        if (idx === -1) {
+            time++;
+            continue;
+        }
+
+        time += p[idx].bt;
+        p[idx].ct = time;
+        done[idx] = true;
+        completed++;
+        energy += 2.1 * (p[idx].bt / 1000.0);
+    }
+
+    calcMetrics(p);
+    return { p: p, energy: energy };
+}
+
+// ----- Round Robin (correct, step-by-step) -----
+function rr(proc, q) {
+    var p = JSON.parse(JSON.stringify(proc));
+    var n = p.length;
+    var rem = new Array(n);
+    for (var i = 0; i < n; i++) rem[i] = p[i].bt;
+
+    var time = p[0].at;   // start at earliest arrival
+    var completed = 0;
+    var energy = 0;
+    var queue = [];
+
+    while (completed < n) {
+        // enqueue processes arriving at current time
+        for (var i = 0; i < n; i++) {
+            if (p[i].at === time && rem[i] > 0 && queue.indexOf(i) === -1) {
+                queue.push(i);
+            }
+        }
+
+        if (queue.length === 0) {
+            time++;
+            continue;
+        }
+
+        var idx = queue.shift();  // take from front
+        var run = 0;
+
+        // run up to quantum, step = 1 time unit
+        while (run < q && rem[idx] > 0) {
+            rem[idx]--;
+            time++;
+            run++;
+            energy += 2.1 * (1 / 1000.0);
+
+            // during execution, new arrivals are added behind current queue
+            for (var j = 0; j < n; j++) {
+                if (p[j].at === time && rem[j] > 0 && queue.indexOf(j) === -1) {
+                    queue.push(j);
+                }
+            }
+        }
+
+        if (rem[idx] === 0) {
+            p[idx].ct = time;
+            completed++;
+        } else {
+            queue.push(idx);  // not finished, go to end of queue
+        }
+    }
+
+    calcMetrics(p);
+    return { p: p, energy: energy };
+}
+
+// ----- DPAS (SJF + power levels) -----
+function dpas(proc) {
+    var p = JSON.parse(JSON.stringify(proc));
+    var n = p.length;
+    var done = new Array(n).fill(false);
+    var completed = 0;
+    var energy = 0;
+    var time = p[0].at;
+
+    while (completed < n) {
+        var idx = -1;
+        var mn  = Number.POSITIVE_INFINITY;
+
+        for (var i = 0; i < n; i++) {
+            if (!done[i] && p[i].at <= time) {
+                if (p[i].bt < mn || (p[i].bt === mn && p[i].id < p[idx].id)) {
+                    mn = p[i].bt;
+                    idx = i;
+                }
+            }
+        }
+
+        if (idx === -1) {
+            time++;
+            continue;
+        }
+
+        var bt = p[idx].bt;
+        var power;
+        if (bt <= 3)       power = 1.2;
+        else if (bt <= 10) power = 2.1;
+        else               power = 3.0;
+
+        time += bt;
+        p[idx].ct = time;
+        done[idx] = true;
+        completed++;
+        energy += power * (bt / 1000.0);
+    }
+
+    calcMetrics(p);
+    return { p: p, energy: energy };
+}
+
+// ----- Run all algorithms -----
+function runAll() {
+    var proc = getProcesses();
+    if (proc === null) return;
+
+    var qVal = document.getElementById("quantum").value;
+    var q = parseInt(qVal);
+    if (isNaN(q) || q <= 0) {
+        alert("Please enter a valid positive quantum for RR.");
+        return;
+    }
+
+    var resFCFS = fcfs(proc);
+    var resSJF  = sjf(proc);
+    var resRR   = rr(proc, q);
+    var resDPAS = dpas(proc);
+
+    var out = "";
+    out += buildTable("FCFS", resFCFS.p);
+    out += buildTable("SJF (Non-Preemptive)", resSJF.p);
+    out += buildTable("Round Robin (Quantum = " + q + ")", resRR.p);
+    out += buildTable("DPAS (Energy-Efficient)", resDPAS.p);
+
+    out += '<div class="card">' +
+           '<h2>Energy Comparison (Joules)</h2>' +
+           '<p>FCFS : ' + resFCFS.energy.toFixed(6) + '</p>' +
+           '<p>SJF  : '  + resSJF.energy.toFixed(6)  + '</p>' +
+           '<p>RR   : '  + resRR.energy.toFixed(6)   + '</p>' +
+           '<p>DPAS : '  + resDPAS.energy.toFixed(6) + '</p>' +
+           '</div>';
+
+    document.getElementById("results").innerHTML = out;
+}
+</script>
+</body>
+</html>
